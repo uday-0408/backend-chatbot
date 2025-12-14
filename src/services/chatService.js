@@ -57,3 +57,24 @@ export async function getAllChats() {
     orderBy: { createdAt: "desc" }
   });
 }
+
+export async function getAllSessions() {
+  const sessions = await prisma.chatSession.findMany({
+    include: { 
+      messages: {
+        orderBy: { createdAt: "desc" },
+        take: 1 // Get only the latest message for preview
+      }
+    },
+    orderBy: { createdAt: "desc" }
+  });
+  
+  return sessions.map(session => ({
+    sessionId: session.sessionId,
+    user: `User-${session.sessionId.substring(0, 8)}`,
+    lastMessage: session.messages[0]?.content || 'No messages yet',
+    timestamp: session.messages[0]?.createdAt || session.createdAt,
+    isActive: false, // Will be updated by active sessions
+    createdAt: session.createdAt
+  }));
+}

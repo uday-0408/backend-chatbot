@@ -1,8 +1,9 @@
-import { createChatSession, saveMessage, getMessages } from "../services/chatService.js";
+import { createChatSession, saveMessage, getMessages, getAllSessions } from "../services/chatService.js";
 
 // Store admin sockets for broadcasting
 let adminSockets = new Set();
 let activeSessions = new Map();
+let socketToSession = new Map(); // Track which socket belongs to which session
 
 export function chatSocket(io, socket) {
   console.log("Client connected:", socket.id);
@@ -21,6 +22,40 @@ export function chatSocket(io, socket) {
   socket.on("get-sessions", () => {
     const sessionsList = Array.from(activeSessions.values());
     socket.emit("sessions-list", sessionsList);
+  });
+
+  // Handle getting all sessions (including past ones) from database
+  socket.on("get-all-sessions", async () => {
+    console.log("Admin requesting all sessions from database...");
+    try {
+      const allSessions = await getAllSessions();
+      console.log(`Found ${allSessions.length} sessions in database`);
+      const activeSessionIds = new Set(activeSessions.keys());
+      console.log(`Found ${activeSessionIds.size} active sessions in memory`);
+      
+      // Mark active sessions and merge with database sessions
+      const mergedSessions = allSessions.map(session => {
+        if (activeSessionIds.has(session.sessionId)) {
+          const activeSession = activeSessions.get(session.sessionId);
+          return {
+            ...session,
+            isActive: true,
+            lastMessage: activeSession.lastMessage || session.lastMessage,
+            timestamp: activeSession.timestamp || session.timestamp
+          };
+        }
+        return {
+          ...session,
+          timestamp: new Date(session.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+      });
+      
+      console.log(`Sending ${mergedSessions.length} merged sessions to admin`);
+      socket.emit("all-sessions-list", mergedSessions);
+    } catch (error) {
+      console.error("Error getting all sessions:", error);
+      socket.emit("all-sessions-list", []);
+    }
   });
 
   // Handle getting messages for a specific session
@@ -43,6 +78,20 @@ export function chatSocket(io, socket) {
       console.error("Error getting messages:", error);
       socket.emit("messages-history", []);
     }
+  });
+
+  // Handle admin joining a specific session room to receive messages
+  socket.on("admin-join-session", ({ sessionId }) => {
+    console.log(`Admin ${socket.id} joining session room: ${sessionId}`);
+    socket.join(sessionId);
+    console.log(`Admin ${socket.id} successfully joined room ${sessionId}`);
+  });
+
+  // Handle admin leaving a specific session room
+  socket.on("admin-leave-session", ({ sessionId }) => {
+    console.log(`Admin ${socket.id} leaving session room: ${sessionId}`);
+    socket.leave(sessionId);
+    console.log(`Admin ${socket.id} left room ${sessionId}`);
   });
 
   socket.on("init_session", async ({ sessionId }, callback) => {
@@ -73,6 +122,9 @@ export function chatSocket(io, socket) {
     // Join the socket to the session room
     socket.join(sessionId);
     console.log(`Socket ${socket.id} joined room ${sessionId}`);
+    
+    // Track socket-session relationship
+    socketToSession.set(socket.id, sessionId);
     
     // Track active session
     if (!activeSessions.has(sessionId)) {
@@ -156,7 +208,7 @@ export function chatSocket(io, socket) {
       };
       
       console.log("Sending formatted admin message:", formattedMessage);
-      // Send message to user in that session
+      // Send message to all clients in that session room (including admin and user)
       io.to(sessionId).emit("message", formattedMessage);
       console.log(`Admin message sent to room ${sessionId}`);
       
@@ -188,23 +240,25 @@ export function chatSocket(io, socket) {
       console.log("Admin disconnected:", socket.id);
     }
     
-    // Mark user sessions as inactive if they disconnect
-    // Find sessions that this socket was part of
-    for (const [sessionId, session] of activeSessions.entries()) {
-      // Mark session as inactive (but keep it in memory for a while)
-      if (session.isActive) {
-        session.isActive = false;
-        session.lastMessage = session.lastMessage || "User disconnected";
-        session.timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        
-        // Notify admins about session status change
-        adminSockets.forEach(adminId => {
-          const adminSocket = io.sockets.sockets.get(adminId);
-          if (adminSocket) {
-            adminSocket.emit("sessions-list", Array.from(activeSessions.values()));
-          }
-        });
-      }
+    // Check if this socket was associated with a user session
+    const sessionId = socketToSession.get(socket.id);
+    if (sessionId && activeSessions.has(sessionId)) {
+      console.log(`Socket ${socket.id} was associated with session ${sessionId}`);
+      const session = activeSessions.get(sessionId);
+      session.isActive = false;
+      session.lastMessage = session.lastMessage || "User disconnected";
+      session.timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      
+      // Remove socket-session mapping
+      socketToSession.delete(socket.id);
+      
+      // Notify admins about session status change
+      adminSockets.forEach(adminId => {
+        const adminSocket = io.sockets.sockets.get(adminId);
+        if (adminSocket) {
+          adminSocket.emit("sessions-list", Array.from(activeSessions.values()));
+        }
+      });
     }
   });
 }
