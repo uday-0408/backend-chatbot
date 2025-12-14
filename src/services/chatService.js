@@ -9,12 +9,28 @@ export async function createChatSession(ip, userAgent) {
   return sessionId;
 }
 
+export async function getSession(sessionId) {
+  return prisma.chatSession.findUnique({
+    where: { sessionId }
+  });
+}
+
 export async function saveMessage(sessionId, sender, content, isAI = false) {
-  const session = await prisma.chatSession.findUnique({
+  // Find existing session or create new one
+  let session = await prisma.chatSession.findUnique({
     where: { sessionId }
   });
 
-  if (!session) throw new Error("Chat session not found");
+  if (!session) {
+    console.log(`Session ${sessionId} not found in database, creating new one`);
+    session = await prisma.chatSession.create({
+      data: { 
+        sessionId,
+        ip: 'unknown',
+        userAgent: 'unknown'
+      }
+    });
+  }
 
   return prisma.message.create({
     data: {
