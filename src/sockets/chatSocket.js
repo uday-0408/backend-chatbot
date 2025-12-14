@@ -74,6 +74,7 @@ export function chatSocket(io, socket) {
         id: msg.id,
         message: msg.content,
         isAdmin: msg.sender === 'admin',
+        isAI: msg.isAI || false,
         timestamp: msg.timestamp
       }));
       
@@ -266,14 +267,16 @@ export function chatSocket(io, socket) {
           
           // Save AI response as admin message
           console.log('💾 Saving AI response to database...');
-          const aiMsg = await saveMessage(sessionId, "admin", aiResponse);
-          console.log('✅ AI message saved:', aiMsg.id);
+          console.log('🤖 AI Response details:', { sessionId, sender: 'admin', content: aiResponse, isAI: true });
+          const aiMsg = await saveMessage(sessionId, "admin", aiResponse, true);
+          console.log('✅ AI message saved:', aiMsg.id, 'isAI:', aiMsg.isAI);
           
           // Format AI response for frontend
           const formattedAiMessage = {
             sender: aiMsg.sender,
             content: aiMsg.content,
-            createdAt: aiMsg.createdAt.toISOString()
+            createdAt: aiMsg.createdAt.toISOString(),
+            isAI: aiMsg.isAI
           };
           
           // Send AI response to user and admins in this session
@@ -289,11 +292,14 @@ export function chatSocket(io, socket) {
           
           // Send fallback message
           console.log('🔄 Sending fallback message...');
-          const fallbackMsg = await saveMessage(sessionId, "admin", "I'm sorry, I'm having trouble generating a response right now. An admin will assist you shortly.");
+          console.log('🤖 Fallback message details:', { sessionId, sender: 'admin', isAI: true });
+          const fallbackMsg = await saveMessage(sessionId, "admin", "I'm sorry, I'm having trouble generating a response right now. An admin will assist you shortly.", true);
+          console.log('✅ Fallback message saved:', fallbackMsg.id, 'isAI:', fallbackMsg.isAI);
           const formattedFallback = {
             sender: fallbackMsg.sender,
             content: fallbackMsg.content,
-            createdAt: fallbackMsg.createdAt.toISOString()
+            createdAt: fallbackMsg.createdAt.toISOString(),
+            isAI: fallbackMsg.isAI
           };
           
           io.to(sessionId).emit("message", formattedFallback);
@@ -334,14 +340,15 @@ export function chatSocket(io, socket) {
     console.log(`Admin sending message to session ${sessionId}: ${content}`);
     
     try {
-      const msg = await saveMessage(sessionId, "admin", content);
+      const msg = await saveMessage(sessionId, "admin", content, false);
       console.log("Saved admin message:", msg);
       
       // Format message for frontend
       const formattedMessage = {
         sender: msg.sender,
         content: msg.content,
-        createdAt: msg.createdAt.toISOString()
+        createdAt: msg.createdAt.toISOString(),
+        isAI: msg.isAI
       };
       
       console.log("Sending formatted admin message:", formattedMessage);

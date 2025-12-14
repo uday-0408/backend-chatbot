@@ -16,6 +16,8 @@ export async function getSession(sessionId) {
 }
 
 export async function saveMessage(sessionId, sender, content, isAI = false) {
+  console.log(`[chatService.js - saveMessage] Saving message: sessionId=${sessionId}, sender=${sender}, content=${content.substring(0, 50)}..., isAI=${isAI}`);
+  
   // Find existing session or create new one
   let session = await prisma.chatSession.findUnique({
     where: { sessionId }
@@ -32,7 +34,7 @@ export async function saveMessage(sessionId, sender, content, isAI = false) {
     });
   }
 
-  return prisma.message.create({
+  const savedMessage = await prisma.message.create({
     data: {
       chatSessionId: session.id,
       sender,
@@ -40,6 +42,9 @@ export async function saveMessage(sessionId, sender, content, isAI = false) {
       isAI
     }
   });
+  
+  console.log(`[chatService.js - saveMessage] Message saved successfully: id=${savedMessage.id}, isAI=${savedMessage.isAI}`);
+  return savedMessage;
 }
 
 export async function getMessages(sessionId) {
